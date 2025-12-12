@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Simple Shooter</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* スクロール防止 */
+            background-color: #222;
+            touch-action: none; /* スマホでの操作性向上 */
+            font-family: sans-serif;
+        }
+        canvas {
+            display: block;
+            margin: 0 auto;
+            background-color: #333;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 20px;
+            pointer-events: none; /* UIがクリックを邪魔しないように */
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            text-align: center;
+            display: none; /* 最初は非表示 */
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 18px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">Score: <span id="score">0</span></div>
+<div id="game-over">
+    <h1>GAME OVER</h1>
+    <p>Score: <span id="final-score">0</span></p>
+    <button onclick="resetGame()">RETRY</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // キャンバスサイズをウィンドウに合わせる（スマホ対応）
+    function resize() {
+        canvas.width = window.innerWidth > 600 ? 400 : window.innerWidth; // PCなら幅400固定、スマホなら全幅
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // ゲームの状態
+    let gameRunning = true;
+    let score = 0;
+    let frameCount = 0;
+
+    // プレイヤー設定
+    const player = {
+        x: canvas.width / 2 - 20,
+        y: canvas.height - 100,
+        width: 40,
+        height: 40,
+        color: '#00BFFF',
+        speed: 0
+    };
+
+    // 配列
+    let bullets = [];
+    let enemies = [];
+
+    // 操作（マウス・タッチ）
+    let targetX = player.x;
+
+    function handleInput(e) {
+        if (!gameRunning) return;
+        let clientX;
+        if (e.touches) {
+            clientX = e.touches[0].clientX;
+        } else {
+            clientX = e.clientX;
+        }
+        
+        // キャンバス内の座標に変換（PCで画面中央配置の場合の補正）
+        const rect = canvas.getBoundingClientRect();
+        const relativeX = clientX - rect.left;
+
+        // 自機の中心が指に来るように
+        targetX = relativeX - player.width / 2;
+    }
+
+    window.addEventListener('mousemove', handleInput);
+    window.addEventListener('touchmove', handleInput, { passive: false });
+
+    // ゲームルーチン
+    function update() {
+        if (!gameRunning) return;
+
+        // プレイヤーの移動（滑らかに追従）
+        player.x += (targetX - player.x) * 0.2;
+        
+        // 画面外に出ないように制限
+        if (player.x < 0) player.x = 0;
+        if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+
+        // 弾の発射（一定間隔）
+        if (frameCount % 10 === 0) {
+            bullets.push({
+                x: player.x + player.width / 2 - 5,
+                y: player.y,
+                width: 10,
+                height: 20,
+                color: '#FFD700',
+                speed: 10
+            });
+        }
+
+        // 敵の出現（ランダム）
+        if (frameCount % 60 === 0) { // 60フレーム（約1秒）ごとに敵出現
+            const size = 40;
+            const xPos = Math.random() * (canvas.width - size);
+            enemies.push({
+                x: xPos,
+                y: -size,
+                width: size,
+                height: size,
+                color: '#FF4444',
+                speed: 3 + Math.random() * 2 // 速度はランダム
+            });
+        }
+
+        // 弾の移動
+        for (let i = 0; i < bullets.length; i++) {
+            bullets[i].y -= bullets[i].speed;
+            // 画面外に出たら消す
+            if (bullets[i].y < 0) {
+                bullets.splice(i, 1);
+                i--;
+            }
+        }
+
+        // 敵の移動と当たり判定
+        for (let i = 0; i < enemies.length; i++) {
+            enemies[i].y += enemies[i].speed;
+
+            // プレイヤーとの衝突（ゲームオーバー）
+            if (rectIntersect(player, enemies[i])) {
+                gameOver();
+            }
+
+            // 弾との衝突
+            for (let j = 0; j < bullets.length; j++) {
+                if (rectIntersect(bullets[j], enemies[i])) {
+                    // 敵と弾を削除
+                    enemies.splice(i, 1);
+                    bullets.splice(j, 1);
+                    i--;
+                    j--; // ループインデックスの調整
+                    
+                    // スコア加算
+                    score += 100;
+                    document.getElementById('score').innerText = score;
+                    break; 
+                }
+            }
+
+            // 画面外に出た敵を消す
+            if (enemies[i] && enemies[i].y > canvas.height) {
+                enemies.splice(i, 1);
+                i--;
+            }
+        }
+
+        frameCount++;
+        draw();
+        requestAnimationFrame(update);
+    }
+
+    // 描画処理
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // プレイヤー
+        ctx.fillStyle = player.color;
+        ctx.fillRect(player.x, player.y, player.width, player.height);
+
+        // 弾
+        ctx.fillStyle = '#FFD700';
+        bullets.forEach(b => ctx.fillRect(b.x, b.y, b.width, b.height));
+
+        // 敵
+        ctx.fillStyle = '#FF4444';
+        enemies.forEach(e => ctx.fillRect(e.x, e.y, e.width, e.height));
+    }
+
+    // 当たり判定（矩形同士）
+    function rectIntersect(r1, r2) {
+        return !(r2.x > r1.x + r1.width || 
+                 r2.x + r2.width < r1.x || 
+                 r2.y > r1.y + r1.height || 
+                 r2.y + r2.height < r1.y);
+    }
+
+    function gameOver() {
+        gameRunning = false;
+        document.getElementById('game-over').style.display = 'block';
+        document.getElementById('final-score').innerText = score;
+    }
+
+    function resetGame() {
+        score = 0;
+        frameCount = 0;
+        bullets = [];
+        enemies = [];
+        player.x = canvas.width / 2 - 20;
+        targetX = player.x;
+        document.getElementById('score').innerText = '0';
+        document.getElementById('game-over').style.display = 'none';
+        gameRunning = true;
+        update();
+    }
+
+    // ゲーム開始
+    update();
+
+</script>
+</body>
+</html>
