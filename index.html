@@ -4,13 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Crowd Runner 3D - Ultimate RPG</title>
+    <title>Crowd Runner 3D - Beyond</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
             background-color: #87CEEB;
             font-family: sans-serif;
+            user-select: none;
         }
 
         #ui {
@@ -18,11 +19,9 @@
             top: 10px;
             left: 10px;
             color: white;
-            font-size: 20px;
-            font-weight: bold;
-            text-shadow: 2px 2px 0 #000;
             pointer-events: none;
             z-index: 10;
+            text-shadow: 2px 2px 0 #000;
         }
 
         #coin-ui {
@@ -38,7 +37,7 @@
 
         #fever-bar-container {
             position: absolute;
-            top: 90px;
+            top: 100px;
             left: 10px;
             width: 200px;
             height: 20px;
@@ -57,7 +56,7 @@
 
         #fever-text {
             position: absolute;
-            top: 60px;
+            top: 70px;
             left: 10px;
             font-size: 24px;
             color: #FFD700;
@@ -81,20 +80,24 @@
             }
         }
 
-        #game-over {
+        #game-over,
+        #start-screen {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             color: white;
             text-align: center;
-            display: none;
             z-index: 20;
             background: rgba(0, 0, 0, 0.9);
             padding: 20px;
             border-radius: 10px;
             border: 4px solid #fff;
-            min-width: 300px;
+            min-width: 320px;
+        }
+
+        #game-over {
+            display: none;
         }
 
         .btn {
@@ -115,17 +118,12 @@
             transform: translateY(2px);
         }
 
-        .shop-btn {
-            background: #4CAF50;
-            box-shadow: 0 4px 0 #2E7D32;
-        }
-
-        #shop-menu {
-            margin-top: 20px;
-            text-align: left;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 10px;
-            border-radius: 5px;
+        .buy-btn {
+            font-size: 14px;
+            padding: 5px 10px;
+            background: #FFD700;
+            color: #000;
+            box-shadow: 0 2px 0 #B8860B;
         }
 
         .upgrade-item {
@@ -135,12 +133,10 @@
             align-items: center;
         }
 
-        .buy-btn {
-            font-size: 14px;
-            padding: 5px 10px;
-            background: #FFD700;
-            color: #000;
-            box-shadow: 0 2px 0 #B8860B;
+        h1,
+        h2,
+        h3 {
+            margin: 10px 0;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -149,9 +145,10 @@
 <body>
 
     <div id="ui">
-        LEVEL: <span id="level">1</span><br>
-        SOLDIERS: <span id="count">1</span><br>
-        SCORE: <span id="score">0</span>
+        <h2>Lvl <span id="level">1</span></h2>
+        <div>👥 <span id="count">1</span></div>
+        <div>🏹 <span id="count-archer">0</span> 🛡️ <span id="count-shield">0</span></div>
+        <div>SCORE: <span id="score">0</span></div>
     </div>
     <div id="coin-ui">💰 <span id="coins">0</span></div>
     <div id="fever-text">FEVER MODE!!</div>
@@ -159,64 +156,116 @@
         <div id="fever-bar"></div>
     </div>
 
+    <div id="start-screen">
+        <h1>Crowd Runner<br>Ultimate</h1>
+        <p>Tap to Start & Enable Sound</p>
+        <button class="btn" onclick="startGame()">START</button>
+    </div>
+
     <div id="game-over">
         <h1 id="result-title">GAME OVER</h1>
         <p>Score: <span id="final-score">0</span></p>
         <div id="shop-menu">
             <h3>Power Up Shop</h3>
-            <div class="upgrade-item">
-                <span>Start Soldiers (Lv.<span id="lvl-start">1</span>)</span>
-                <button class="btn buy-btn" onclick="buyUpgrade('start')">50G</button>
-            </div>
-            <div class="upgrade-item">
-                <span>Fever Time (Lv.<span id="lvl-fever">1</span>)</span>
-                <button class="btn buy-btn" onclick="buyUpgrade('fever')">100G</button>
-            </div>
+            <div class="upgrade-item"><span>Start Units (Lv.<span id="lvl-start">1</span>)</span><button
+                    class="btn buy-btn" onclick="buyUpgrade('start')">50G</button></div>
+            <div class="upgrade-item"><span>Fever Time (Lv.<span id="lvl-fever">1</span>)</span><button
+                    class="btn buy-btn" onclick="buyUpgrade('fever')">100G</button></div>
         </div>
         <button id="retry-btn" class="btn" onclick="nextAction()">RETRY</button>
     </div>
 
     <script>
-        // --- ゲーム定数 ---
+        // --- Audio System ---
+        const AudioSys = {
+            ctx: null,
+            bgmOscs: [],
+            init: function () {
+                window.AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioContext();
+                this.playBGM();
+            },
+            playTone: function (freq, type, duration, vol = 0.1) {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            },
+            playCoin: function () { this.playTone(1200, 'square', 0.1, 0.1); setTimeout(() => this.playTone(1800, 'square', 0.2, 0.1), 100); },
+            playGate: function (good) { if (good) this.playTone(880, 'sine', 0.3, 0.1); else this.playTone(200, 'sawtooth', 0.3, 0.1); },
+            playDamage: function () { this.playTone(100, 'sawtooth', 0.2, 0.2); },
+            playExplosion: function () {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(10, this.ctx.currentTime + 1);
+                gain.gain.setValueAtTime(0.5, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 1);
+                osc.connect(gain); gain.connect(this.ctx.destination);
+                osc.start(); osc.stop(this.ctx.currentTime + 1);
+            },
+            playBGM: function () {
+                if (!this.ctx) return;
+                const melody = [330, 330, 392, 440, 330, 294, 262, 294]; // 簡易メロディ
+                let idx = 0;
+                const playNote = () => {
+                    if (!gameActive && bossState !== 'battling') return; // ゲーム中のみ
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.value = melody[idx % melody.length] * (bossState === 'battling' ? 0.8 : 1.0); // ボス戦は少し低く
+                    gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
+                    osc.connect(gain); gain.connect(this.ctx.destination);
+                    osc.start(); osc.stop(this.ctx.currentTime + 0.2);
+                    idx++;
+                    setTimeout(playNote, 250);
+                };
+                playNote();
+            }
+        };
+
+        // --- Game Constants & State ---
         let RUN_SPEED = 0.3;
         const LIMIT_X = 6;
         let GOAL_Z = 400;
 
-        // 永続データ (localStorage)
-        let savedData = {
-            coins: 0,
-            lvlStart: 1, // 初期兵士数: 1 + lvl
-            lvlFever: 1, // フィーバー時間: 300 + lvl*50 frame
-        };
-
-        // レベル管理
+        let savedData = { coins: 0, lvlStart: 1, lvlFever: 1 };
         let currentLevel = 1;
         let scene, camera, renderer;
         let soldiers = [];
         let crowdGroup;
         let score = 0;
-        let gameActive = true;
+        let gameActive = false; // Start screen first
         let frame = 0;
         let particles = [];
         let obstacles = [];
         let coinObjects = [];
-        let projectiles = []; // ボスの攻撃
+        let projectiles = [];
+        let soldierProjectiles = []; // 弓兵の矢
 
-        // フィーバー
         let feverValue = 0;
         const FEVER_MAX = 100;
         let isFever = false;
         let feverTimer = 0;
 
-        // ボス
         let bossMesh = null;
         let bossHP;
         let bossState = 'waiting';
         let bossAttackTimer = 0;
+        let bossLaserMesh = null;
+        let laserCharge = 0;
 
         let targetX = 0;
 
-        // バイオーム
         const BIOMES = [
             { name: "GRASS", color: 0x3cb371, sky: 0x87CEEB, deco: 0x228B22 },
             { name: "DESERT", color: 0xE6C229, sky: 0xFFD700, deco: 0x8B4513 },
@@ -225,15 +274,22 @@
         ];
         let currentBiome = BIOMES[0];
 
+        // --- Core Functions ---
         function loadData() {
             const d = localStorage.getItem('crowd_runner_save');
             if (d) savedData = JSON.parse(d);
             updateShopUI();
         }
+        function saveData() { localStorage.setItem('crowd_runner_save', JSON.stringify(savedData)); updateShopUI(); }
 
-        function saveData() {
-            localStorage.setItem('crowd_runner_save', JSON.stringify(savedData));
-            updateShopUI();
+        function startGame() {
+            document.getElementById('start-screen').style.display = 'none';
+            AudioSys.init();
+            init();
+            gameActive = true;
+
+            // 初期兵士 (Shop)
+            for (let i = 0; i < savedData.lvlStart; i++) addSoldier('normal');
         }
 
         function init() {
@@ -244,8 +300,8 @@
             window.addEventListener('resize', onWindowResize, false);
             document.addEventListener('mousemove', onMouseMove, false);
             document.addEventListener('touchmove', onTouchMove, { passive: false });
-
-            animate();
+            // Start animate loop if not running
+            if (frame === 0) animate();
         }
 
         function setupScene() {
@@ -266,52 +322,35 @@
 
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambientLight);
-
             const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(-5, 10, -5);
-            dirLight.castShadow = true;
+            dirLight.position.set(-5, 10, -5); dirLight.castShadow = true;
             scene.add(dirLight);
 
             const groundGeo = new THREE.PlaneGeometry(30, 2000);
             const groundMat = new THREE.MeshLambertMaterial({ color: currentBiome.color });
             const ground = new THREE.Mesh(groundGeo, groundMat);
-            ground.rotation.x = -Math.PI / 2;
-            ground.position.z = 500;
-            ground.receiveShadow = true;
-            ground.name = "ground";
+            ground.rotation.x = -Math.PI / 2; ground.position.z = 500; ground.receiveShadow = true; ground.name = "ground";
             scene.add(ground);
 
             createDecorations();
         }
 
         function setupGame() {
-            soldiers = [];
-            particles = [];
-            obstacles = [];
-            coinObjects = [];
-            projectiles = [];
-            gates = [];
-            bossMesh = null;
-            bossState = 'waiting';
-            gameActive = true;
-            frame = 0;
+            soldiers = []; particles = []; obstacles = []; coinObjects = []; projectiles = []; soldierProjectiles = []; gates = [];
+            bossMesh = null; bossLaserMesh = null; bossState = 'waiting'; laserCharge = 0;
+
+            frame = 1; // start
             crowdGroup = new THREE.Group();
-            crowdGroup.position.set(0, 0, 0);
             scene.add(crowdGroup);
 
-            feverValue = 0;
-            isFever = false;
+            feverValue = 0; isFever = false;
 
             RUN_SPEED = 0.3 + (currentLevel * 0.05);
             GOAL_Z = 350 + (currentLevel * 50);
-            bossHP = 50 + (currentLevel * 20);
+            bossHP = 100 + (currentLevel * 50); // HP増加
 
             createGoal();
-
-            // 初期兵士数UP (Shop)
-            for (let i = 0; i < savedData.lvlStart; i++) {
-                addSoldier();
-            }
+            addSoldier('normal'); // 必ず1人はいる
         }
 
         function updateBiomeColors() {
@@ -325,7 +364,7 @@
 
         function createDecorations() {
             for (let z = 20; z < GOAL_Z; z += 30) {
-                [-10, 10].forEach(x => {
+                [-12, 12].forEach(x => {
                     if (Math.random() > 0.3) {
                         const size = Math.random() * 2 + 1;
                         const geo = new THREE.ConeGeometry(size, size * 2, 4);
@@ -338,38 +377,64 @@
             }
         }
 
-        function createCoin(x, z) {
-            const geo = new THREE.CylinderGeometry(0.5, 0.5, 0.1, 8);
-            const mat = new THREE.MeshBasicMaterial({ color: 0xFFD700 });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.rotation.z = Math.PI / 2;
-            mesh.position.set(x, 1, z);
-            scene.add(mesh);
-            coinObjects.push(mesh);
-        }
+        // --- Soldier System ---
+        // Types: normal, archer, shield
+        function addSoldier(type = 'normal') {
+            const s = createSoldierMesh(type);
+            s.userData.type = type;
+            s.userData.hp = 1;
+            if (type === 'shield') s.userData.shield = true;
 
-        // --- 兵士 ---
-        function addSoldier() {
-            const color = isFever ? 0xFFD700 : 0x1E90FF;
-            const soldier = createSoldierMesh(color);
-            soldiers.push(soldier);
-            crowdGroup.add(soldier);
-            createParticles(soldier.position.x, soldier.position.y, soldier.position.z + crowdGroup.position.z, 0x00FFFF, 5);
+            soldiers.push(s);
+            crowdGroup.add(s);
+            createParticles(s.position.x, s.position.y, s.position.z + crowdGroup.position.z, 0x00FFFF, 5);
             updateFormation();
             updateUI();
             addFever(2);
         }
 
-        function createSoldierMesh(color) {
+        function createSoldierMesh(type) {
             const group = new THREE.Group();
-            const mat = new THREE.MeshLambertMaterial({ color: color });
-            const headMat = new THREE.MeshLambertMaterial({ color: 0xFFD700 });
+            // Color based on type or Fever
+            let bodyColor = isFever ? 0xFFD700 : 0x1E90FF;
+            let headColor = 0xFFD700;
+            let hatColor = null;
+
+            if (!isFever) {
+                if (type === 'archer') { bodyColor = 0xFF6347; hatColor = 0x8B0000; } // Reddish
+                if (type === 'shield') { bodyColor = 0x32CD32; hatColor = 0x006400; } // Greenish
+            }
+
+            const mat = new THREE.MeshLambertMaterial({ color: bodyColor });
             const bodyGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.6, 8);
             const body = new THREE.Mesh(bodyGeo, mat);
             body.position.y = 0.5; group.add(body);
+
+            const headMat = new THREE.MeshLambertMaterial({ color: headColor });
             const headGeo = new THREE.SphereGeometry(0.25, 8, 8);
             const head = new THREE.Mesh(headGeo, headMat);
             head.position.y = 1.0; group.add(head);
+
+            if (hatColor) {
+                const hatGeo = new THREE.ConeGeometry(0.3, 0.3, 8);
+                const hatMat = new THREE.MeshLambertMaterial({ color: hatColor });
+                const hat = new THREE.Mesh(hatGeo, hatMat);
+                hat.position.y = 1.3; group.add(hat);
+            }
+
+            // 装備品
+            if (type === 'archer') {
+                const bowGeo = new THREE.TorusGeometry(0.2, 0.02, 4, 8, Math.PI);
+                const bow = new THREE.Mesh(bowGeo, new THREE.MeshBasicMaterial({ color: 0x8B4513 }));
+                bow.position.set(0.2, 0.6, 0.1); bow.rotation.y = Math.PI / 2;
+                group.add(bow);
+            } else if (type === 'shield') {
+                const shGeo = new THREE.BoxGeometry(0.4, 0.5, 0.05);
+                const sh = new THREE.Mesh(shGeo, new THREE.MeshBasicMaterial({ color: 0xA9A9A9 }));
+                sh.position.set(0, 0.6, 0.2);
+                group.add(sh);
+            }
+
             return group;
         }
 
@@ -386,137 +451,34 @@
             }
         }
 
-        // --- フィーバー ---
-        function addFever(amount) {
-            if (isFever) return;
-            feverValue += amount;
-            if (feverValue >= FEVER_MAX) activateFever();
-            updateUI();
-        }
-
-        function activateFever() {
-            isFever = true;
-            feverValue = FEVER_MAX;
-            feverTimer = 300 + (savedData.lvlFever - 1) * 50; // Shop効果
-            document.getElementById('fever-text').style.display = 'block';
-            soldiers.forEach(s => { s.children[0].material.color.setHex(0xFFD700); s.scale.setScalar(1.5); });
-            RUN_SPEED *= 1.5;
-        }
-
-        function updateFever() {
-            if (!isFever) return;
-            feverTimer--;
-            feverValue = (feverTimer / (300 + (savedData.lvlFever - 1) * 50)) * FEVER_MAX;
-            if (feverTimer <= 0) {
-                isFever = false;
-                feverValue = 0;
-                document.getElementById('fever-text').style.display = 'none';
-                soldiers.forEach(s => { s.children[0].material.color.setHex(0x1E90FF); s.scale.setScalar(1.0); });
-                RUN_SPEED /= 1.5;
-            }
-            updateUI();
-        }
-
-        // --- エフェクト ---
-        function createParticles(x, y, z, color, count) {
-            for (let i = 0; i < count; i++) {
-                const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-                const mat = new THREE.MeshBasicMaterial({ color: color });
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.position.set(x, y, z);
-                mesh.userData = { vel: new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.5, (Math.random() - 0.5) * 0.5), life: 1.0 };
-                scene.add(mesh);
-                particles.push(mesh);
+        // --- Actions ---
+        function soldierAttack(s) {
+            if (s.userData.type === 'archer') {
+                // 矢を放つ
+                if (Math.random() < 0.05) { // 確率で発射
+                    const arrow = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.6), new THREE.MeshBasicMaterial({ color: 0xFFFFFF }));
+                    arrow.position.set(s.position.x + crowdGroup.position.x, 1, s.position.z + crowdGroup.position.z);
+                    arrow.userData = { vel: new THREE.Vector3(0, 0.1, 1), from: 'player' };
+                    scene.add(arrow);
+                    soldierProjectiles.push(arrow);
+                    AudioSys.playTone(600, 'triangle', 0.05, 0.05);
+                }
             }
         }
 
-        function updateParticles() {
-            for (let i = particles.length - 1; i >= 0; i--) {
-                const p = particles[i];
-                p.position.add(p.userData.vel);
-                p.userData.vel.y -= 0.02; p.rotation.x += 0.1;
-                p.userData.life -= 0.02; p.scale.setScalar(p.userData.life);
-                if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
-            }
-        }
-
-        // --- 入力 ---
-        function onMouseMove(e) { targetX = -(e.clientX / window.innerWidth * 2 - 1) * LIMIT_X; }
-        function onTouchMove(e) { e.preventDefault(); targetX = -(e.touches[0].clientX / window.innerWidth * 2 - 1) * LIMIT_X; }
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        // --- ゲームループ ---
-        function animate() {
-            requestAnimationFrame(animate);
-            if (!gameActive) return;
-            frame++;
-
-            if (bossState !== 'battling') {
-                crowdGroup.position.z += RUN_SPEED;
-                camera.position.z += RUN_SPEED;
-            }
-
-            crowdGroup.position.x += (targetX - crowdGroup.position.x) * 0.1;
-            if (crowdGroup.position.x > LIMIT_X) crowdGroup.position.x = LIMIT_X;
-            if (crowdGroup.position.x < -LIMIT_X) crowdGroup.position.x = -LIMIT_X;
-
-            soldiers.forEach((s, i) => {
-                s.position.y = Math.abs(Math.sin(frame * 0.2 + i)) * 0.2;
-                s.rotation.y = Math.sin(frame * 0.1) * 0.2;
-            });
-
-            updateLevel();
-            updateParticles();
-            updateObstacles();
-            updateBoss();
-            updateFever();
-            updateCoins();
-            updateProjectiles();
-
-            renderer.render(scene, camera);
-        }
-
-        // --- ゴール＆ボス ---
-        function createGoal() {
-            const lineGeo = new THREE.PlaneGeometry(30, 2);
-            const texLoader = new THREE.TextureLoader();
-            const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 64, 64);
-            ctx.fillStyle = 'black'; ctx.fillRect(0, 0, 32, 32); ctx.fillRect(32, 32, 32, 32);
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(20, 1);
-            const lineMat = new THREE.MeshBasicMaterial({ map: tex });
-            const goalLine = new THREE.Mesh(lineGeo, lineMat);
-            goalLine.rotation.x = -Math.PI / 2;
-            goalLine.position.set(0, 0.05, GOAL_Z);
-            scene.add(goalLine);
-
-            createBoss();
-        }
-
+        // --- Boss Logic ---
         function createBoss() {
             const group = new THREE.Group();
             group.position.set(0, 0, GOAL_Z + 15);
-            const mat = new THREE.MeshLambertMaterial({ color: 0x800080 });
+            const mat = new THREE.MeshLambertMaterial({ color: 0x4B0082 });
             const bossScalar = 1 + (currentLevel * 0.2);
-            const bodyGeo = new THREE.BoxGeometry(6, 12, 4);
-            const body = new THREE.Mesh(bodyGeo, mat);
-            body.position.y = 6; group.add(body);
-            const headGeo = new THREE.BoxGeometry(4, 4, 4);
-            const head = new THREE.Mesh(headGeo, mat);
-            head.position.y = 14; group.add(head);
-            const eyeGeo = new THREE.PlaneGeometry(1, 1);
+
+            const body = new THREE.Mesh(new THREE.BoxGeometry(6, 12, 4), mat); body.position.y = 6; group.add(body);
+            const head = new THREE.Mesh(new THREE.BoxGeometry(4, 4, 4), mat); head.position.y = 14; group.add(head);
+
             const eyeMat = new THREE.MeshBasicMaterial({ color: 0xFF0000 });
-            const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-            leftEye.position.set(-1, 14, 2.1); group.add(leftEye);
-            const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-            rightEye.position.set(1, 14, 2.1); group.add(rightEye);
+            const leftEye = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), eyeMat); leftEye.position.set(-1, 14, 2.1); group.add(leftEye);
+            const rightEye = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), eyeMat); rightEye.position.set(1, 14, 2.1); group.add(rightEye);
 
             group.scale.setScalar(bossScalar);
             scene.add(group);
@@ -525,289 +487,269 @@
 
         function updateBoss() {
             if (!bossMesh || bossState === 'dead') return;
+
             if (bossState === 'waiting') {
                 bossMesh.position.y = Math.sin(frame * 0.05) * 1;
             }
+
             if (gameActive && crowdGroup.position.z > GOAL_Z - 5) {
                 bossState = 'battling';
-
-                // ボスの攻撃ロジック
                 bossAttackTimer++;
-                if (bossAttackTimer > 60) { // 1秒ごとに攻撃判定
-                    if (Math.random() < 0.3) {
-                        bossAttack();
-                    }
-                    bossAttackTimer = 0;
+
+                // Laser Logic
+                if (bossAttackTimer > 200 && laserCharge === 0) {
+                    // start charging
+                    laserCharge = 1;
+                    AudioSys.playTone(100, 'sawtooth', 1.0, 0.3); // チャージ音
+                }
+                if (laserCharge > 0) {
+                    updateBossLaser();
+                } else if (bossAttackTimer % 100 === 0 && Math.random() < 0.5) {
+                    bossRockAttack();
                 }
 
+                // Player Attack
                 if (frame % 5 === 0 && soldiers.length > 0) {
                     const s = soldiers.pop();
                     crowdGroup.remove(s);
-                    updateFormation();
-                    updateUI();
+                    updateFormation(); updateUI();
                     createParticles(bossMesh.position.x + (Math.random() - 0.5) * 5, bossMesh.position.y + Math.random() * 10, bossMesh.position.z, 0xFFFF00, 10);
                     bossHP -= (isFever ? 10 : 5);
-                    bossMesh.scale.multiplyScalar(0.99); bossMesh.position.x = (Math.random() - 0.5) * 1.0;
+                    bossMesh.scale.multiplyScalar(0.995);
+                    AudioSys.playDamage();
                     if (bossHP <= 0) bossDefeated();
-                } else if (soldiers.length === 0 && bossHP > 0) {
-                    gameOver();
                 }
+
+                // Archer Auto Attack
+                soldiers.forEach(s => soldierAttack(s));
+
+                if (soldiers.length === 0 && bossHP > 0) gameOver();
             }
         }
 
-        function bossAttack() {
-            // 岩投げ
-            const rockGeo = new THREE.SphereGeometry(1, 8, 8);
-            const rockMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
-            const rock = new THREE.Mesh(rockGeo, rockMat);
-            rock.position.copy(bossMesh.position);
-            rock.position.y += 10;
-            rock.userData = { vel: new THREE.Vector3((Math.random() - 0.5) * 2, 0, -1) }; // 手前に投げる
-            scene.add(rock);
-            projectiles.push(rock);
+        function updateBossLaser() {
+            laserCharge++;
+            if (!bossLaserMesh) {
+                const geo = new THREE.CylinderGeometry(0.1, 0.1, 40); // Charging beam
+                const mat = new THREE.MeshBasicMaterial({ color: 0xFF0000, transparent: true, opacity: 0.5 });
+                bossLaserMesh = new THREE.Mesh(geo, mat);
+                bossLaserMesh.rotation.x = Math.PI / 2;
+                bossLaserMesh.position.set(0, 5, -20);
+                bossMesh.add(bossLaserMesh);
+            }
+
+            bossLaserMesh.scale.setScalar(1 + laserCharge * 0.1); // チャージで太く
+            bossLaserMesh.material.opacity = 0.5 + Math.sin(laserCharge) * 0.2;
+
+            if (laserCharge > 60) { // FIRE
+                AudioSys.playExplosion();
+                // 全体攻撃判定
+                // 盾兵がいるかチェック
+                const shieldIndex = soldiers.findIndex(s => s.userData.type === 'shield' && s.userData.shield);
+                if (shieldIndex !== -1 && !isFever) {
+                    // 盾兵が防ぐ
+                    soldiers[shieldIndex].userData.shield = false; // 盾消費
+                    createParticles(bossMesh.position.x, 5, bossMesh.position.z - 10, 0x00FF00, 30); // ガードエフェクト
+                } else if (!isFever) {
+                    // ダメージ
+                    removeSoldier(Math.floor(soldiers.length / 2) + 1); // 半壊
+                    createParticles(0, 5, GOAL_Z, 0xFF0000, 50);
+                }
+
+                bossMesh.remove(bossLaserMesh);
+                bossLaserMesh = null;
+                laserCharge = 0;
+                bossAttackTimer = 0;
+            }
+        }
+
+        function bossRockAttack() {
+            const rock = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 8), new THREE.MeshLambertMaterial({ color: 0x555555 }));
+            rock.position.copy(bossMesh.position); rock.position.y += 10;
+            rock.userData = { vel: new THREE.Vector3((Math.random() - 0.5) * 2, 0, -1), type: 'enemy' };
+            scene.add(rock); projectiles.push(rock);
         }
 
         function bossDefeated() {
-            bossState = 'dead';
-            scene.remove(bossMesh);
-            for (let i = 0; i < 100; i++) createParticles(0, 10, GOAL_Z + 15, Math.random() * 0xffffff, 2);
-            savedData.coins += 100; // ボス撃破ボーナス
-            saveData();
+            bossState = 'dead'; scene.remove(bossMesh);
+            AudioSys.playExplosion();
+            savedData.coins += 100; saveData();
             levelClear();
         }
 
         function updateProjectiles() {
+            // Rocks
             for (let i = projectiles.length - 1; i >= 0; i--) {
                 const p = projectiles[i];
                 p.position.add(p.userData.vel);
-                p.rotation.x += 0.1;
-
-                // 地面についたら消える
                 if (p.position.y < 0) { scene.remove(p); projectiles.splice(i, 1); continue; }
-
-                // 衝突判定
                 if (p.position.z < crowdGroup.position.z + 2 && p.position.z > crowdGroup.position.z - 2) {
-                    // X距離チェック
-                    const distX = Math.abs(p.position.x - crowdGroup.position.x);
-                    if (distX < 2 && !isFever) {
-                        removeSoldier(3); // 岩は3人消す
-                        createParticles(p.position.x, 0, p.position.z, 0xFF0000, 10);
-                        scene.remove(p); projectiles.splice(i, 1);
+                    if (Math.abs(p.position.x - crowdGroup.position.x) < 2 && !isFever) {
+                        removeSoldier(3); scene.remove(p); projectiles.splice(i, 1);
                     }
+                }
+            }
+            // Soldier Arrows
+            for (let i = soldierProjectiles.length - 1; i >= 0; i--) {
+                const p = soldierProjectiles[i];
+                p.position.add(p.userData.vel);
+                if (p.position.z > GOAL_Z + 15) { // Boss hit
+                    if (bossState === 'battling') {
+                        bossHP -= 2;
+                        createParticles(p.position.x, p.position.y, p.position.z, 0xFFFF00, 2);
+                    }
+                    scene.remove(p); soldierProjectiles.splice(i, 1);
+                } else if (p.position.z > GOAL_Z + 50) {
+                    scene.remove(p); soldierProjectiles.splice(i, 1);
                 }
             }
         }
 
-        // --- その他オブジェクト ---
-        function updateCoins() {
-            coinObjects.forEach(c => { c.rotation.y += 0.05; });
-            for (let i = coinObjects.length - 1; i >= 0; i--) {
-                const c = coinObjects[i];
-                if (c.position.z < crowdGroup.position.z + 1 && c.position.z > crowdGroup.position.z - 1) {
-                    const distX = Math.abs(c.position.x - crowdGroup.position.x);
-                    if (distX < 3) { // 磁石効果（固定）
-                        scene.remove(c); coinObjects.splice(i, 1);
-                        savedData.coins++;
-                        updateUI();
-                    }
-                }
-            }
+        // --- Fever & Particles (Standard functions) ---
+        function addFever(amount) { if (isFever) return; feverValue += amount; if (feverValue >= FEVER_MAX) activateFever(); updateUI(); }
+        function activateFever() { isFever = true; feverValue = FEVER_MAX; feverTimer = 300 + (savedData.lvlFever - 1) * 50; document.getElementById('fever-text').style.display = 'block'; RUN_SPEED *= 1.5; updateSoldierVisuals(); }
+        function updateFever() {
+            if (!isFever) return; feverTimer--; feverValue = (feverTimer / (300 + (savedData.lvlFever - 1) * 50)) * FEVER_MAX;
+            if (feverTimer <= 0) { isFever = false; feverValue = 0; document.getElementById('fever-text').style.display = 'none'; RUN_SPEED /= 1.5; updateSoldierVisuals(); }
+            updateUI();
+        }
+        function updateSoldierVisuals() {
+            scene.remove(crowdGroup);
+            crowdGroup = new THREE.Group();
+            crowdGroup.position.copy(crowdGroup.position);
+            scene.add(crowdGroup);
+            // Rebuild meshes
+            const oldSoldiers = soldiers;
+            soldiers = [];
+            oldSoldiers.forEach(old => {
+                const s = createSoldierMesh(old.userData.type);
+                s.userData = old.userData;
+                s.position.copy(old.position);
+                soldiers.push(s); crowdGroup.add(s);
+            });
         }
 
-        function createHammer(z) {
-            const group = new THREE.Group();
-            group.position.set(0, 1.5, z);
-            const poleGeo = new THREE.CylinderGeometry(0.2, 0.2, 4);
-            const pole = new THREE.Mesh(poleGeo, new THREE.MeshLambertMaterial({ color: 0x888888 })); group.add(pole);
-            const headGeo = new THREE.BoxGeometry(8, 1, 1);
-            const head = new THREE.Mesh(headGeo, new THREE.MeshLambertMaterial({ color: 0x333333 })); head.position.y = 1; group.add(head);
-            group.userData = { type: 'hammer', speed: (Math.random() > 0.5 ? 0.05 : -0.05) * (1 + currentLevel * 0.1) };
-            scene.add(group); obstacles.push(group);
-        }
+        function createParticles(x, y, z, c, n) { for (let i = 0; i < n; i++) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({ color: c })); m.position.set(x, y, z); m.userData = { vel: new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.5, (Math.random() - 0.5) * 0.5), life: 1 }; scene.add(m); particles.push(m); } }
+        function updateParticles() { for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.position.add(p.userData.vel); p.userData.life -= 0.05; p.scale.setScalar(p.userData.life); if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); } } }
 
+        // --- Environment (Coins, Obstacles) ---
+        function updateCoins() { coinObjects.forEach((c, i) => { c.rotation.y += 0.05; if (c.position.z < crowdGroup.position.z + 1 && c.position.z > crowdGroup.position.z - 1 && Math.abs(c.position.x - crowdGroup.position.x) < 3) { scene.remove(c); coinObjects.splice(i, 1); savedData.coins++; updateUI(); AudioSys.playCoin(); } }); }
+        function createHammer(z) { const g = new THREE.Group(); g.position.set(0, 1.5, z); g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 4), new THREE.MeshLambertMaterial({ color: 0x888888 }))); const h = new THREE.Mesh(new THREE.BoxGeometry(8, 1, 1), new THREE.MeshLambertMaterial({ color: 0x333333 })); h.position.y = 1; g.add(h); g.userData = { type: 'hammer', speed: (Math.random() > 0.5 ? 0.05 : -0.05) * (1 + currentLevel * 0.1) }; scene.add(g); obstacles.push(g); }
         function updateObstacles() {
-            obstacles.forEach(obs => {
-                if (obs.userData.type === 'hammer') { obs.rotation.z += obs.userData.speed; }
-                if (obs.position.z < crowdGroup.position.z + 2 && obs.position.z > crowdGroup.position.z - 2) {
-                    if (isFever) {
-                        scene.remove(obs); obs.position.y = -100;
-                        createParticles(obs.position.x, 2, obs.position.z, 0xFFA500, 20);
-                    } else {
-                        const angle = Math.abs(obs.rotation.z % Math.PI);
-                        if (angle < 0.5 || angle > 2.6) {
-                            if (Math.random() < 0.1) {
-                                removeSoldier(1);
-                                createParticles(obs.position.x, 1, obs.position.z, 0xFF0000, 5);
-                            }
-                        }
+            obstacles.forEach((o, i) => {
+                if (o.userData.type == 'hammer') o.rotation.z += o.userData.speed;
+                if (o.position.z < crowdGroup.position.z + 2 && o.position.z > crowdGroup.position.z - 2) {
+                    if (isFever) { scene.remove(o); obstacles.splice(i, 1); createParticles(o.position.x, 2, o.position.z, 0xFFA500, 20); AudioSys.playExplosion(); }
+                    else if (Math.abs(o.rotation.z % Math.PI) < 0.5 || Math.abs(o.rotation.z % Math.PI) > 2.6) {
+                        if (Math.random() < 0.1) removeSoldier(1);
                     }
                 }
             });
         }
 
-        let gates = [];
-        const GATE_INTERVAL = 40;
-
+        // --- Gates ---
         function createGate(zPos) {
-            const val1 = getRandomGateValue();
-            const gate1 = createGateMesh(val1, -2.5, zPos);
-            const val2 = getRandomGateValue();
-            const gate2 = createGateMesh(val2, 2.5, zPos);
-            gates.push(gate1, gate2); scene.add(gate1, gate2);
-
-            if (Math.random() < 0.4 + (currentLevel * 0.1)) createHammer(zPos + 20);
-            // コイン生成
-            for (let k = 0; k < 5; k++) createCoin((Math.random() - 0.5) * 8, zPos + 10 + k * 2);
-        }
-
-        function getRandomGateValue() {
+            // Randomly decide gate content (Archer/Shield/Math)
             const type = Math.random();
-            if (type < 0.4) return { op: '+', val: Math.floor(Math.random() * 15) + 5 };
-            else if (type < 0.7) return { op: 'x', val: Math.floor(Math.random() * 3) + 2 };
-            else return { op: '-', val: Math.floor(Math.random() * 10) + 5 };
-        }
+            let val1, val2;
+            if (type < 0.1) { val1 = { op: 'type', val: 'archer' }; val2 = { op: 'type', val: 'shield' }; }
+            else { val1 = getRandomGateValue(); val2 = getRandomGateValue(); }
 
-        function createGateMesh(gateData, x, z) {
-            const group = new THREE.Group(); group.position.set(x, 1.5, z);
-            const isGood = (gateData.op === '+' || gateData.op === 'x');
-            const color = isGood ? 0x00BFFF : 0xFF4444;
-            const geo = new THREE.BoxGeometry(4.5, 3, 0.2);
-            const mat = new THREE.MeshLambertMaterial({ color: color, transparent: true, opacity: 0.3 });
-            const mesh = new THREE.Mesh(geo, mat); group.add(mesh);
-            const edges = new THREE.EdgesGeometry(geo);
-            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: color })); group.add(line);
-            const text = `${gateData.op}${gateData.val}`;
-            const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 128;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = isGood ? 'rgba(0,191,255,0.8)' : 'rgba(255,68,68,0.8)'; ctx.fillRect(0, 0, 256, 128);
-            ctx.font = 'bold 80px Arial'; ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, 128, 64);
-            const tex = new THREE.CanvasTexture(canvas);
-            const textMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
-            const textMesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 2), textMat); textMesh.position.z = 0.11; group.add(textMesh);
-            group.userData = { gateData: gateData, active: true };
-            return group;
-        }
+            const g1 = createGateMesh(val1, -2.5, zPos);
+            const g2 = createGateMesh(val2, 2.5, zPos);
+            gates.push(g1, g2); scene.add(g1, g2);
 
+            if (Math.random() < 0.4 + currentLevel * 0.1) createHammer(zPos + 20);
+            for (let k = 0; k < 5; k++) {
+                const c = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.1, 8), new THREE.MeshBasicMaterial({ color: 0xFFD700 }));
+                c.rotation.z = Math.PI / 2; c.position.set((Math.random() - 0.5) * 8, 1, zPos + 10 + k * 2); scene.add(c); coinObjects.push(c);
+            }
+        }
+        function getRandomGateValue() { const r = Math.random(); return r < 0.4 ? { op: '+', val: Math.floor(Math.random() * 10) + 5 } : r < 0.7 ? { op: 'x', val: 2 } : { op: '-', val: Math.floor(Math.random() * 5) + 2 }; }
+        function createGateMesh(d, x, z) {
+            const g = new THREE.Group(); g.position.set(x, 1.5, z);
+            const good = (d.op === '+' || d.op === 'x' || d.op === 'type');
+            const color = good ? 0x00BFFF : 0xFF4444;
+            const box = new THREE.Mesh(new THREE.BoxGeometry(4.5, 3, 0.2), new THREE.MeshLambertMaterial({ color: color, transparent: true, opacity: 0.3 })); g.add(box);
+            const txt = (d.op === 'type') ? d.val.toUpperCase() : `${d.op}${d.val}`;
+            const can = document.createElement('canvas'); can.width = 256; can.height = 128;
+            const ctx = can.getContext('2d'); ctx.fillStyle = good ? 'rgba(0,191,255,0.8)' : 'rgba(255,68,68,0.8)'; ctx.fillRect(0, 0, 256, 128);
+            ctx.font = 'bold 60px Arial'; ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, 128, 64);
+            const tm = new THREE.Mesh(new THREE.PlaneGeometry(4, 2), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(can), transparent: true })); tm.position.z = 0.11; g.add(tm);
+            g.userData = { data: d, active: true }; return g;
+        }
         function updateLevel() {
-            const nextGateZ = (Math.floor(crowdGroup.position.z / GATE_INTERVAL) + 1) * GATE_INTERVAL;
-            if (nextGateZ > GOAL_Z - 30) return;
-            const lastGate = gates[gates.length - 1];
-            if (!lastGate || lastGate.position.z < nextGateZ) createGate(nextGateZ + 20);
-            for (let i = gates.length - 1; i >= 0; i--) {
-                const gate = gates[i];
-                if (gate.userData.active && gate.position.z < crowdGroup.position.z) {
-                    const distX = Math.abs(gate.position.x - crowdGroup.position.x);
-                    if (distX < 2.5) {
-                        applyGateEffect(gate.userData.gateData);
-                        gate.userData.active = false; gate.visible = false;
-                        createParticles(gate.position.x, gate.position.y, gate.position.z, 0xFFFFFF, 20);
-                    }
+            const nextZ = (Math.floor(crowdGroup.position.z / 40) + 1) * 40;
+            if (nextZ < GOAL_Z - 30 && (!gates.length || gates[gates.length - 1].position.z < nextZ)) createGate(nextZ + 20);
+            gates.forEach(g => {
+                if (g.userData.active && g.position.z < crowdGroup.position.z && Math.abs(g.position.x - crowdGroup.position.x) < 2.5) {
+                    applyGate(g.userData.data); g.userData.active = false; g.visible = false; AudioSys.playGate(true);
                 }
-                if (gate.position.z < crowdGroup.position.z - 20) { scene.remove(gate); gates.splice(i, 1); }
+            });
+        }
+        function applyGate(d) {
+            if (d.op === 'type') { for (let i = 0; i < 3; i++) addSoldier(d.val); }
+            else {
+                let n = soldiers.length, t = n;
+                if (d.op === '+') t += d.val; else if (d.op === 'x') t *= d.val; else t -= d.val;
+                t = Math.floor(t); if (t < 0) t = 0;
+                const diff = t - n;
+                if (diff > 0) for (let i = 0; i < diff; i++) addSoldier('normal');
+                else removeSoldier(Math.abs(diff));
             }
         }
 
-        function applyGateEffect(data) {
-            let currentCount = soldiers.length;
-            let newCount = currentCount;
-            if (data.op === '+') newCount += data.val;
-            else if (data.op === 'x') newCount *= data.val;
-            else if (data.op === '-') newCount -= data.val;
-            newCount = Math.floor(newCount); if (newCount < 1) newCount = 0;
-            const diff = newCount - currentCount;
-            if (diff > 0) for (let i = 0; i < diff; i++) addSoldier();
-            else if (diff < 0) removeSoldier(Math.abs(diff));
-        }
-
-        function removeSoldier(count) {
+        function removeSoldier(n) {
             if (isFever) return;
-            for (let i = 0; i < count; i++) {
+            for (let i = 0; i < n; i++) {
                 if (soldiers.length === 0) break;
-                const s = soldiers.pop();
-                createParticles(s.position.x + crowdGroup.position.x, s.position.y, s.position.z + crowdGroup.position.z, 0xFF0000, 5);
-                crowdGroup.remove(s);
+                const s = soldiers.pop(); crowdGroup.remove(s);
+                createParticles(s.position.x + crowdGroup.position.x, 0.5, s.position.z + crowdGroup.position.z, 0xFF0000, 5);
+                AudioSys.playDamage();
             }
             updateFormation(); updateUI();
             if (soldiers.length === 0) gameOver();
         }
 
-        function levelClear() {
-            gameActive = false;
-            document.getElementById('game-over').style.display = 'block';
-            document.getElementById('result-title').innerText = `LEVEL ${currentLevel} CLEARED!`;
-            document.getElementById('result-title').style.color = "#FFD700";
-            document.getElementById('final-score').innerHTML = `Bonus +100 Coins<br>Remaining: ${soldiers.length}`;
-            const btn = document.getElementById('retry-btn');
-            btn.innerText = "NEXT LEVEL";
-            btn.onclick = nextLevel;
+        function onMouseMove(e) { if (gameActive) targetX = -(e.clientX / window.innerWidth * 2 - 1) * LIMIT_X; }
+        function onTouchMove(e) { if (gameActive) { e.preventDefault(); targetX = -(e.touches[0].clientX / window.innerWidth * 2 - 1) * LIMIT_X; } }
+        function onWindowResize() { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerWidth); }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!gameActive) return;
+            frame++;
+
+            if (bossState !== 'battling') { crowdGroup.position.z += RUN_SPEED; camera.position.z += RUN_SPEED; }
+            crowdGroup.position.x += (targetX - crowdGroup.position.x) * 0.1;
+
+            soldiers.forEach((s, i) => { s.position.y = Math.abs(Math.sin(frame * 0.2 + i)) * 0.2; s.rotation.y = Math.sin(frame * 0.1) * 0.2; });
+
+            updateLevel(); updateParticles(); updateCoins(); updateObstacles(); updateProjectiles(); updateBoss(); updateFever();
+            renderer.render(scene, camera);
         }
 
-        function gameOver() {
-            gameActive = false;
-            document.getElementById('game-over').style.display = 'block';
-            document.getElementById('result-title').innerText = "GAME OVER";
-            document.getElementById('result-title').style.color = "#FF0000";
-            document.getElementById('final-score').innerText = score;
-            const btn = document.getElementById('retry-btn');
-            btn.innerText = "RETRY";
-            btn.onclick = resetGame;
-        }
-
-        function nextLevel() {
-            currentLevel++;
-            document.getElementById('game-over').style.display = 'none';
-            while (scene.children.length > 0) scene.remove(scene.children[0]);
-            init();
-        }
-
-        function resetGame() {
-            // 現在のレベルのままリセット (本来は1に戻すとか選べるべきだが簡易的に)
-            document.getElementById('game-over').style.display = 'none';
-            while (scene.children.length > 0) scene.remove(scene.children[0]);
-            init();
-        }
-
-        function nextAction() {
-            if (soldiers.length > 0) nextLevel();
-            else resetGame();
-        }
+        function levelClear() { gameActive = false; document.getElementById('game-over').style.display = 'block'; document.getElementById('result-title').innerText = `LEVEL ${currentLevel} CLEARED!`; document.getElementById('retry-btn').innerText = "NEXT LEVEL"; document.getElementById('retry-btn').onclick = nextLevel; }
+        function gameOver() { gameActive = false; document.getElementById('game-over').style.display = 'block'; document.getElementById('result-title').innerText = "GAME OVER"; document.getElementById('retry-btn').innerText = "RETRY"; document.getElementById('retry-btn').onclick = startGame; }
+        function nextLevel() { currentLevel++; document.getElementById('game-over').style.display = 'none'; while (scene.children.length > 0) scene.remove(scene.children[0]); init(); gameActive = true; }
+        function nextAction() { if (soldiers.length > 0) nextLevel(); else startGame(); }
 
         function updateUI() {
             document.getElementById('level').innerText = currentLevel;
             document.getElementById('count').innerText = soldiers.length;
-            score = Math.floor(crowdGroup.position.z) + (currentLevel - 1) * 1000;
-            document.getElementById('score').innerText = score;
+            document.getElementById('count-archer').innerText = soldiers.filter(s => s.userData.type === 'archer').length;
+            document.getElementById('count-shield').innerText = soldiers.filter(s => s.userData.type === 'shield').length;
+            document.getElementById('score').innerText = Math.floor(crowdGroup.position.z);
             document.getElementById('coins').innerText = savedData.coins;
             document.getElementById('fever-bar').style.width = (feverValue / FEVER_MAX * 100) + '%';
         }
-
-        // --- Shop ---
-        function updateShopUI() {
-            document.getElementById('coins').innerText = savedData.coins;
-            document.getElementById('lvl-start').innerText = savedData.lvlStart;
-            document.getElementById('lvl-fever').innerText = savedData.lvlFever;
+        function updateShopUI() { document.getElementById('coins').innerText = savedData.coins; document.getElementById('lvl-start').innerText = savedData.lvlStart; document.getElementById('lvl-fever').innerText = savedData.lvlFever; }
+        function buyUpgrade(t) {
+            let c = 0;
+            if (t === 'start') { c = 50 * savedData.lvlStart; if (savedData.coins >= c) { savedData.coins -= c; savedData.lvlStart++; saveAndPlaySound(); } }
+            if (t === 'fever') { c = 100 * savedData.lvlFever; if (savedData.coins >= c) { savedData.coins -= c; savedData.lvlFever++; saveAndPlaySound(); } }
         }
-
-        function buyUpgrade(type) {
-            let cost = 0;
-            if (type === 'start') {
-                cost = 50 * savedData.lvlStart; // コスト上昇
-                if (savedData.coins >= cost) {
-                    savedData.coins -= cost;
-                    savedData.lvlStart++;
-                    saveData();
-                }
-            } else if (type === 'fever') {
-                cost = 100 * savedData.lvlFever;
-                if (savedData.coins >= cost) {
-                    savedData.coins -= cost;
-                    savedData.lvlFever++;
-                    saveData();
-                }
-            }
-        }
-
-        init();
+        function saveAndPlaySound() { saveData(); AudioSys.playCoin(); updateShopUI(); }
 
     </script>
 </body>
