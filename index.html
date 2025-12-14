@@ -79,6 +79,7 @@
         const RUN_SPEED = 0.2;
         const SWAY_SPEED = 0.15;
         const LIMIT_X = 6;
+        const GOAL_Z = 350; // ゴール地点
 
         let scene, camera, renderer;
         let soldiers = []; // 兵士オブジェクトの配列
@@ -98,7 +99,7 @@
 
             // カメラ
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-            camera.position.set(0, 8, -12); // 後方上空から見下ろす
+            camera.position.set(0, 8, -12);
             camera.lookAt(0, 0, 5);
 
             // レンダラー
@@ -129,6 +130,9 @@
             crowdGroup = new THREE.Group();
             scene.add(crowdGroup);
 
+            // ゴール・城の作成
+            createGoal();
+
             // 初期兵士追加
             addSoldier();
 
@@ -152,9 +156,8 @@
 
         function createSoldierMesh(color) {
             const group = new THREE.Group();
-
             const mat = new THREE.MeshLambertMaterial({ color: color });
-            const headMat = new THREE.MeshLambertMaterial({ color: 0xFFD700 }); // 金色の頭
+            const headMat = new THREE.MeshLambertMaterial({ color: 0xFFD700 });
 
             // 体
             const bodyGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.6, 8);
@@ -170,26 +173,20 @@
             head.castShadow = true;
             group.add(head);
 
-            // 手足（アニメーション用）
-            // 簡易的に表現
             return group;
         }
 
         function updateFormation() {
-            // 兵士の数に応じて位置を計算
             const count = soldiers.length;
             if (count === 0) return;
 
-            // 中心に1人
             soldiers[0].position.set(0, 0, 0);
 
-            // 2人目以降
             let radius = 0.5;
             let angle = 0;
             for (let i = 1; i < count; i++) {
-                angle += 1; // 黄金角に近い感じで
+                angle += 1;
                 radius = 0.4 * Math.sqrt(i);
-
                 const x = Math.cos(angle * 2.4) * radius;
                 const z = Math.sin(angle * 2.4) * radius;
                 soldiers[i].position.set(x, 0, z);
@@ -199,7 +196,7 @@
         // --- 入力処理 ---
         function onMouseMove(event) {
             const x = (event.clientX / window.innerWidth) * 2 - 1;
-            targetX = -x * LIMIT_X; // マウスの動きと逆にならないように調整
+            targetX = -x * LIMIT_X;
         }
 
         function onTouchMove(event) {
@@ -226,7 +223,7 @@
             crowdGroup.position.z += RUN_SPEED;
             camera.position.z += RUN_SPEED;
 
-            // 左右移動（滑らかに）
+            // 左右移動
             crowdGroup.position.x += (targetX - crowdGroup.position.x) * 0.1;
 
             // 範囲制限
@@ -239,11 +236,85 @@
                 s.rotation.y = Math.sin(frame * 0.1) * 0.2;
             });
 
-            // レベル更新（ゲート処理）
+            // レベル更新
             updateLevel();
+
+            // ゴール判定
+            if (crowdGroup.position.z >= GOAL_Z) {
+                gameClear();
+            }
 
             renderer.render(scene, camera);
             updateUI();
+        }
+
+        // --- ゴール作成 ---
+        function createGoal() {
+            // ゴールライン
+            const lineGeo = new THREE.PlaneGeometry(15, 2);
+            const texLoader = new THREE.TextureLoader();
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 64, 64);
+            ctx.fillStyle = 'black'; ctx.fillRect(0, 0, 32, 32); ctx.fillRect(32, 32, 32, 32);
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(10, 1);
+
+            const lineMat = new THREE.MeshBasicMaterial({ map: tex });
+            const goalLine = new THREE.Mesh(lineGeo, lineMat);
+            goalLine.rotation.x = -Math.PI / 2;
+            goalLine.position.set(0, 0.05, GOAL_Z);
+            scene.add(goalLine);
+
+            // お城（簡易版）
+            const castleGroup = new THREE.Group();
+            castleGroup.position.set(0, 0, GOAL_Z + 10);
+
+            const mainMat = new THREE.MeshLambertMaterial({ color: 0xFFA500 });
+            const roofMat = new THREE.MeshLambertMaterial({ color: 0xFF4500 });
+
+            const base = new THREE.Mesh(new THREE.BoxGeometry(8, 6, 6), mainMat);
+            base.position.y = 3;
+            castleGroup.add(base);
+
+            const towerGeo = new THREE.CylinderGeometry(1, 1, 8);
+            const roofGeo = new THREE.ConeGeometry(1.5, 2, 4);
+
+            [-3, 3].forEach(x => {
+                const tower = new THREE.Mesh(towerGeo, mainMat);
+                tower.position.set(x, 4, 3);
+                castleGroup.add(tower);
+                const roof = new THREE.Mesh(roofGeo, roofMat);
+                roof.position.set(x, 9, 3);
+                roof.rotation.y = Math.PI / 4;
+                castleGroup.add(roof);
+            });
+            scene.add(castleGroup);
+        }
+
+        function gameClear() {
+            gameActive = false;
+            const gameOver = document.getElementById('game-over');
+            gameOver.style.display = 'block';
+            gameOver.querySelector('h1').innerText = "LEVEL CLEARED!";
+            gameOver.querySelector('h1').style.color = "#FFD700";
+            gameOver.querySelector('#final-score').innerHTML =
+                `${Math.floor(score * soldiers.length)}<br>(Soldiers: ${soldiers.length})`;
+            gameOver.querySelector('button').innerText = "RETRY";
+
+            // 花火エフェクト
+            for (let i = 0; i < 30; i++) {
+                const mat = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), mat);
+                mesh.position.set(
+                    (Math.random() - 0.5) * 15,
+                    Math.random() * 10 + 5,
+                    GOAL_Z + Math.random() * 10
+                );
+                scene.add(mesh);
+            }
         }
 
         // --- ゲート・レベル管理 ---
@@ -251,13 +322,10 @@
         const GATE_INTERVAL = 40;
 
         function createGate(zPos) {
-            // 2つのゲートを左右に並べる
             const val1 = getRandomGateValue();
             const gate1 = createGateMesh(val1, -2.5, zPos);
-
             const val2 = getRandomGateValue();
             const gate2 = createGateMesh(val2, 2.5, zPos);
-
             gates.push(gate1, gate2);
             scene.add(gate1, gate2);
         }
@@ -265,13 +333,10 @@
         function getRandomGateValue() {
             const type = Math.random();
             if (type < 0.4) {
-                // 加算 (+5 ~ +20)
                 return { op: '+', val: Math.floor(Math.random() * 15) + 5 };
             } else if (type < 0.7) {
-                // 乗算 (x2 ~ x4)
                 return { op: 'x', val: Math.floor(Math.random() * 3) + 2 };
             } else {
-                // 減算 (-5 ~ -15)
                 return { op: '-', val: Math.floor(Math.random() * 10) + 5 };
             }
         }
@@ -280,22 +345,18 @@
             const group = new THREE.Group();
             group.position.set(x, 1.5, z);
 
-            // ゲートの色（青=良い、赤=悪い）
             const isGood = (gateData.op === '+' || gateData.op === 'x');
             const color = isGood ? 0x00BFFF : 0xFF4444;
 
-            // 枠
             const geo = new THREE.BoxGeometry(4.5, 3, 0.2);
             const mat = new THREE.MeshLambertMaterial({ color: color, transparent: true, opacity: 0.3 });
             const mesh = new THREE.Mesh(geo, mat);
             group.add(mesh);
 
-            // 枠線
             const edges = new THREE.EdgesGeometry(geo);
             const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: color }));
             group.add(line);
 
-            // テキスト（テクスチャ生成）
             const text = `${gateData.op}${gateData.val}`;
             const canvas = document.createElement('canvas');
             canvas.width = 256; canvas.height = 128;
@@ -314,38 +375,33 @@
             textMesh.position.z = 0.11;
             group.add(textMesh);
 
-            // データを持たせる
             group.userData = { gateData: gateData, active: true };
-
             return group;
         }
 
         function updateLevel() {
-            // 一定距離ごとにゲート生成
             const nextGateZ = (Math.floor(crowdGroup.position.z / GATE_INTERVAL) + 1) * GATE_INTERVAL;
 
-            // 生成済みかチェック
+            // ゴール手前までしか生成しない
+            if (nextGateZ > GOAL_Z - 30) return;
+
             const lastGate = gates[gates.length - 1];
             if (!lastGate || lastGate.position.z < nextGateZ) {
                 createGate(nextGateZ + 20);
             }
 
-            // ゲート更新
             for (let i = gates.length - 1; i >= 0; i--) {
                 const gate = gates[i];
 
-                // 通過判定
                 if (gate.userData.active && gate.position.z < crowdGroup.position.z) {
-                    // 距離が近い（X軸判定）
                     const distX = Math.abs(gate.position.x - crowdGroup.position.x);
-                    if (distX < 2.5) { // 幅判定
+                    if (distX < 2.5) {
                         applyGateEffect(gate.userData.gateData);
                         gate.userData.active = false;
                         gate.visible = false;
                     }
                 }
 
-                // 掃除
                 if (gate.position.z < crowdGroup.position.z - 20) {
                     scene.remove(gate);
                     gates.splice(i, 1);
@@ -366,7 +422,7 @@
             }
 
             newCount = Math.floor(newCount);
-            if (newCount < 1) newCount = 0; // 全滅
+            if (newCount < 1) newCount = 0;
 
             const diff = newCount - currentCount;
 
@@ -391,6 +447,12 @@
             }
         }
 
+        function gameOver() {
+            gameActive = false;
+            document.getElementById('game-over').style.display = 'block';
+            document.getElementById('final-score').innerText = score;
+        }
+
         function updateUI() {
             document.getElementById('count').innerText = soldiers.length;
             score = Math.floor(crowdGroup.position.z);
@@ -401,7 +463,6 @@
             location.reload();
         }
 
-        // 開始
         init();
 
     </script>
