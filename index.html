@@ -79,36 +79,39 @@
         const RUN_SPEED = 0.2;
         const SWAY_SPEED = 0.15;
         const LIMIT_X = 6;
-        const GOAL_Z = 350; // ゴール地点
+        const GOAL_Z = 350;
+        const BOSS_HP_MAX = 50; // テスト用に調整
 
         let scene, camera, renderer;
-        let soldiers = []; // 兵士オブジェクトの配列
-        let crowdGroup;    // 兵士全体をまとめるグループ
+        let soldiers = [];
+        let crowdGroup;
         let score = 0;
         let gameActive = true;
         let frame = 0;
+        let particles = [];
+        let obstacles = [];
 
-        // マウス位置管理
+        // ボス変数
+        let bossMesh = null;
+        let bossHP = BOSS_HP_MAX;
+        let bossState = 'waiting'; // waiting, battling, dead
+
         let targetX = 0;
 
         function init() {
-            // シーン作成
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB); // 空色
+            scene.background = new THREE.Color(0x87CEEB);
             scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
 
-            // カメラ
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
             camera.position.set(0, 8, -12);
             camera.lookAt(0, 0, 5);
 
-            // レンダラー
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // ライト
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambientLight);
 
@@ -117,26 +120,20 @@
             dirLight.castShadow = true;
             scene.add(dirLight);
 
-            // 地面
             const groundGeo = new THREE.PlaneGeometry(20, 1000);
-            const groundMat = new THREE.MeshLambertMaterial({ color: 0x3cb371 }); // 緑
+            const groundMat = new THREE.MeshLambertMaterial({ color: 0x3cb371 });
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
-            ground.position.z = 400; // 長い道
+            ground.position.z = 400;
             ground.receiveShadow = true;
             scene.add(ground);
 
-            // クラウドグループ（プレイヤー全体）
             crowdGroup = new THREE.Group();
             scene.add(crowdGroup);
 
-            // ゴール・城の作成
             createGoal();
-
-            // 初期兵士追加
             addSoldier();
 
-            // イベントリスナー
             window.addEventListener('resize', onWindowResize, false);
             document.addEventListener('mousemove', onMouseMove, false);
             document.addEventListener('touchmove', onTouchMove, { passive: false });
@@ -150,6 +147,7 @@
             const soldier = createSoldierMesh(color);
             soldiers.push(soldier);
             crowdGroup.add(soldier);
+            createParticles(soldier.position.x, soldier.position.y, soldier.position.z + crowdGroup.position.z, 0x00FFFF, 5);
             updateFormation();
             updateUI();
         }
@@ -159,14 +157,12 @@
             const mat = new THREE.MeshLambertMaterial({ color: color });
             const headMat = new THREE.MeshLambertMaterial({ color: 0xFFD700 });
 
-            // 体
             const bodyGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.6, 8);
             const body = new THREE.Mesh(bodyGeo, mat);
             body.position.y = 0.5;
             body.castShadow = true;
             group.add(body);
 
-            // 頭
             const headGeo = new THREE.SphereGeometry(0.25, 8, 8);
             const head = new THREE.Mesh(headGeo, headMat);
             head.position.y = 1.0;
@@ -179,9 +175,7 @@
         function updateFormation() {
             const count = soldiers.length;
             if (count === 0) return;
-
             soldiers[0].position.set(0, 0, 0);
-
             let radius = 0.5;
             let angle = 0;
             for (let i = 1; i < count; i++) {
@@ -193,18 +187,47 @@
             }
         }
 
-        // --- 入力処理 ---
+        // --- エフェクト ---
+        function createParticles(x, y, z, color, count) {
+            for (let i = 0; i < count; i++) {
+                const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+                const mat = new THREE.MeshBasicMaterial({ color: color });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                mesh.userData = {
+                    vel: new THREE.Vector3((Math.random() - 0.5) * 0.5, Math.random() * 0.5, (Math.random() - 0.5) * 0.5),
+                    life: 1.0
+                };
+                scene.add(mesh);
+                particles.push(mesh);
+            }
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.position.add(p.userData.vel);
+                p.userData.vel.y -= 0.02;
+                p.rotation.x += 0.1;
+                p.userData.life -= 0.02;
+                p.scale.setScalar(p.userData.life);
+                if (p.userData.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- 入力 ---
         function onMouseMove(event) {
             const x = (event.clientX / window.innerWidth) * 2 - 1;
             targetX = -x * LIMIT_X;
         }
-
         function onTouchMove(event) {
             event.preventDefault();
             const x = (event.touches[0].clientX / window.innerWidth) * 2 - 1;
             targetX = -x * LIMIT_X;
         }
-
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -214,43 +237,37 @@
         // --- ゲームループ ---
         function animate() {
             requestAnimationFrame(animate);
-
             if (!gameActive) return;
-
             frame++;
 
-            // 前進
-            crowdGroup.position.z += RUN_SPEED;
-            camera.position.z += RUN_SPEED;
+            // ボス戦以外は前進
+            if (bossState !== 'battling') {
+                crowdGroup.position.z += RUN_SPEED;
+                camera.position.z += RUN_SPEED;
+            }
 
             // 左右移動
             crowdGroup.position.x += (targetX - crowdGroup.position.x) * 0.1;
-
-            // 範囲制限
             if (crowdGroup.position.x > LIMIT_X) crowdGroup.position.x = LIMIT_X;
             if (crowdGroup.position.x < -LIMIT_X) crowdGroup.position.x = -LIMIT_X;
 
-            // 兵士のアニメーション
             soldiers.forEach((s, i) => {
                 s.position.y = Math.abs(Math.sin(frame * 0.2 + i)) * 0.2;
                 s.rotation.y = Math.sin(frame * 0.1) * 0.2;
             });
 
-            // レベル更新
             updateLevel();
-
-            // ゴール判定
-            if (crowdGroup.position.z >= GOAL_Z) {
-                gameClear();
-            }
+            updateParticles();
+            updateObstacles();
+            updateBoss();
 
             renderer.render(scene, camera);
             updateUI();
         }
 
-        // --- ゴール作成 ---
+        // --- ゴール＆ボス ---
         function createGoal() {
-            // ゴールライン
+            // ライン
             const lineGeo = new THREE.PlaneGeometry(15, 2);
             const texLoader = new THREE.TextureLoader();
             const canvas = document.createElement('canvas');
@@ -261,63 +278,121 @@
             const tex = new THREE.CanvasTexture(canvas);
             tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
             tex.repeat.set(10, 1);
-
             const lineMat = new THREE.MeshBasicMaterial({ map: tex });
             const goalLine = new THREE.Mesh(lineGeo, lineMat);
             goalLine.rotation.x = -Math.PI / 2;
             goalLine.position.set(0, 0.05, GOAL_Z);
             scene.add(goalLine);
 
-            // お城（簡易版）
-            const castleGroup = new THREE.Group();
-            castleGroup.position.set(0, 0, GOAL_Z + 10);
-
-            const mainMat = new THREE.MeshLambertMaterial({ color: 0xFFA500 });
-            const roofMat = new THREE.MeshLambertMaterial({ color: 0xFF4500 });
-
-            const base = new THREE.Mesh(new THREE.BoxGeometry(8, 6, 6), mainMat);
-            base.position.y = 3;
-            castleGroup.add(base);
-
-            const towerGeo = new THREE.CylinderGeometry(1, 1, 8);
-            const roofGeo = new THREE.ConeGeometry(1.5, 2, 4);
-
-            [-3, 3].forEach(x => {
-                const tower = new THREE.Mesh(towerGeo, mainMat);
-                tower.position.set(x, 4, 3);
-                castleGroup.add(tower);
-                const roof = new THREE.Mesh(roofGeo, roofMat);
-                roof.position.set(x, 9, 3);
-                roof.rotation.y = Math.PI / 4;
-                castleGroup.add(roof);
-            });
-            scene.add(castleGroup);
+            createBoss();
         }
 
-        function gameClear() {
-            gameActive = false;
-            const gameOver = document.getElementById('game-over');
-            gameOver.style.display = 'block';
-            gameOver.querySelector('h1').innerText = "LEVEL CLEARED!";
-            gameOver.querySelector('h1').style.color = "#FFD700";
-            gameOver.querySelector('#final-score').innerHTML =
-                `${Math.floor(score * soldiers.length)}<br>(Soldiers: ${soldiers.length})`;
-            gameOver.querySelector('button').innerText = "RETRY";
+        function createBoss() {
+            const group = new THREE.Group();
+            group.position.set(0, 0, GOAL_Z + 15);
 
-            // 花火エフェクト
-            for (let i = 0; i < 30; i++) {
-                const mat = new THREE.MeshBasicMaterial({ color: Math.random() * 0xffffff });
-                const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), mat);
-                mesh.position.set(
-                    (Math.random() - 0.5) * 15,
-                    Math.random() * 10 + 5,
-                    GOAL_Z + Math.random() * 10
-                );
-                scene.add(mesh);
+            const mat = new THREE.MeshLambertMaterial({ color: 0x800080 }); // 紫
+            const bodyGeo = new THREE.BoxGeometry(6, 12, 4);
+            const body = new THREE.Mesh(bodyGeo, mat);
+            body.position.y = 6;
+            group.add(body);
+
+            const headGeo = new THREE.BoxGeometry(4, 4, 4);
+            const head = new THREE.Mesh(headGeo, mat);
+            head.position.y = 14;
+            group.add(head);
+
+            const eyeGeo = new THREE.PlaneGeometry(1, 1);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xFF0000 });
+            const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+            leftEye.position.set(-1, 14, 2.1);
+            group.add(leftEye);
+            const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+            rightEye.position.set(1, 14, 2.1);
+            group.add(rightEye);
+
+            scene.add(group);
+            bossMesh = group;
+        }
+
+        function updateBoss() {
+            if (!bossMesh || bossState === 'dead') return;
+
+            if (bossState === 'waiting') {
+                bossMesh.position.y = Math.sin(frame * 0.05) * 1;
+            }
+
+            if (gameActive && crowdGroup.position.z > GOAL_Z - 5) {
+                bossState = 'battling';
+                if (frame % 10 === 0 && soldiers.length > 0) {
+                    const s = soldiers.pop();
+                    crowdGroup.remove(s);
+                    updateFormation();
+                    updateUI();
+
+                    createParticles(
+                        bossMesh.position.x + (Math.random() - 0.5) * 5,
+                        bossMesh.position.y + Math.random() * 10,
+                        bossMesh.position.z,
+                        0xFFFF00, 10
+                    );
+
+                    bossHP -= 5;
+                    bossMesh.scale.multiplyScalar(0.98);
+                    bossMesh.position.x = (Math.random() - 0.5) * 0.5; // 振動
+
+                    if (bossHP <= 0) {
+                        bossDefeated();
+                    }
+                } else if (soldiers.length === 0 && bossHP > 0) {
+                    gameOver();
+                }
             }
         }
 
-        // --- ゲート・レベル管理 ---
+        function bossDefeated() {
+            bossState = 'dead';
+            scene.remove(bossMesh);
+            for (let i = 0; i < 100; i++) {
+                createParticles(0, 10, GOAL_Z + 15, Math.random() * 0xffffff, 1);
+            }
+            gameClear();
+        }
+
+        // --- 障害物 ---
+        function createHammer(z) {
+            const group = new THREE.Group();
+            group.position.set(0, 1.5, z);
+            const poleGeo = new THREE.CylinderGeometry(0.2, 0.2, 4);
+            const pole = new THREE.Mesh(poleGeo, new THREE.MeshLambertMaterial({ color: 0x888888 }));
+            group.add(pole);
+            const headGeo = new THREE.BoxGeometry(8, 1, 1);
+            const head = new THREE.Mesh(headGeo, new THREE.MeshLambertMaterial({ color: 0x333333 }));
+            head.position.y = 1;
+            group.add(head);
+            group.userData = { type: 'hammer', speed: (Math.random() > 0.5 ? 0.05 : -0.05) };
+            scene.add(group);
+            obstacles.push(group);
+        }
+
+        function updateObstacles() {
+            obstacles.forEach(obs => {
+                if (obs.userData.type === 'hammer') {
+                    obs.rotation.z += obs.userData.speed;
+                }
+                if (obs.position.z < crowdGroup.position.z + 2 && obs.position.z > crowdGroup.position.z - 2) {
+                    const angle = Math.abs(obs.rotation.z % Math.PI);
+                    if (angle < 0.5 || angle > 2.6) {
+                        if (Math.random() < 0.1) {
+                            removeSoldier(1);
+                            createParticles(obs.position.x, 1, obs.position.z, 0xFF0000, 5);
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- レベル管理 ---
         let gates = [];
         const GATE_INTERVAL = 40;
 
@@ -328,6 +403,10 @@
             const gate2 = createGateMesh(val2, 2.5, zPos);
             gates.push(gate1, gate2);
             scene.add(gate1, gate2);
+
+            if (Math.random() < 0.5) {
+                createHammer(zPos + 20);
+            }
         }
 
         function getRandomGateValue() {
@@ -344,7 +423,6 @@
         function createGateMesh(gateData, x, z) {
             const group = new THREE.Group();
             group.position.set(x, 1.5, z);
-
             const isGood = (gateData.op === '+' || gateData.op === 'x');
             const color = isGood ? 0x00BFFF : 0xFF4444;
 
@@ -381,27 +459,22 @@
 
         function updateLevel() {
             const nextGateZ = (Math.floor(crowdGroup.position.z / GATE_INTERVAL) + 1) * GATE_INTERVAL;
-
-            // ゴール手前までしか生成しない
             if (nextGateZ > GOAL_Z - 30) return;
-
             const lastGate = gates[gates.length - 1];
             if (!lastGate || lastGate.position.z < nextGateZ) {
                 createGate(nextGateZ + 20);
             }
-
             for (let i = gates.length - 1; i >= 0; i--) {
                 const gate = gates[i];
-
                 if (gate.userData.active && gate.position.z < crowdGroup.position.z) {
                     const distX = Math.abs(gate.position.x - crowdGroup.position.x);
                     if (distX < 2.5) {
                         applyGateEffect(gate.userData.gateData);
                         gate.userData.active = false;
                         gate.visible = false;
+                        createParticles(gate.position.x, gate.position.y, gate.position.z, 0xFFFFFF, 20);
                     }
                 }
-
                 if (gate.position.z < crowdGroup.position.z - 20) {
                     scene.remove(gate);
                     gates.splice(i, 1);
@@ -412,44 +485,43 @@
         function applyGateEffect(data) {
             let currentCount = soldiers.length;
             let newCount = currentCount;
-
-            if (data.op === '+') {
-                newCount += data.val;
-            } else if (data.op === 'x') {
-                newCount *= data.val;
-            } else if (data.op === '-') {
-                newCount -= data.val;
-            }
-
+            if (data.op === '+') { newCount += data.val; }
+            else if (data.op === 'x') { newCount *= data.val; }
+            else if (data.op === '-') { newCount -= data.val; }
             newCount = Math.floor(newCount);
             if (newCount < 1) newCount = 0;
-
             const diff = newCount - currentCount;
-
-            if (diff > 0) {
-                for (let i = 0; i < diff; i++) addSoldier();
-            } else if (diff < 0) {
-                removeSoldier(Math.abs(diff));
-            }
+            if (diff > 0) { for (let i = 0; i < diff; i++) addSoldier(); }
+            else if (diff < 0) { removeSoldier(Math.abs(diff)); }
         }
 
         function removeSoldier(count) {
             for (let i = 0; i < count; i++) {
                 if (soldiers.length === 0) break;
                 const s = soldiers.pop();
+                createParticles(s.position.x + crowdGroup.position.x, s.position.y, s.position.z + crowdGroup.position.z, 0xFF0000, 5);
                 crowdGroup.remove(s);
             }
             updateFormation();
             updateUI();
+            if (soldiers.length === 0) { gameOver(); }
+        }
 
-            if (soldiers.length === 0) {
-                gameOver();
-            }
+        function gameClear() {
+            gameActive = false;
+            const gameOver = document.getElementById('game-over');
+            gameOver.style.display = 'block';
+            gameOver.querySelector('h1').innerText = "BOSS DEFEATED!";
+            gameOver.querySelector('h1').style.color = "#FFD700";
+            gameOver.querySelector('#final-score').innerHTML = `You are the Hero!<br>Units left: ${soldiers.length}`;
+            gameOver.querySelector('button').innerText = "PLAY AGAIN";
         }
 
         function gameOver() {
             gameActive = false;
             document.getElementById('game-over').style.display = 'block';
+            document.getElementById('game-over').querySelector('h1').innerText = "GAME OVER";
+            document.getElementById('game-over').querySelector('h1').style.color = "#FF0000";
             document.getElementById('final-score').innerText = score;
         }
 
