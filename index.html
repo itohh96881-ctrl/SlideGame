@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Crowd Runner 3D</title>
+    <title>Crowd Runner 3D - Ultimate</title>
     <style>
         body {
             margin: 0;
@@ -18,11 +18,56 @@
             top: 10px;
             left: 10px;
             color: white;
-            font-size: 24px;
+            font-size: 20px;
             font-weight: bold;
             text-shadow: 2px 2px 0 #000;
             pointer-events: none;
             z-index: 10;
+        }
+
+        #fever-bar-container {
+            position: absolute;
+            top: 80px;
+            left: 10px;
+            width: 200px;
+            height: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid white;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #fever-bar {
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #FFD700, #FF4500);
+            transition: width 0.2s;
+        }
+
+        #fever-text {
+            position: absolute;
+            top: 50px;
+            left: 10px;
+            font-size: 24px;
+            color: #FFD700;
+            font-weight: bold;
+            display: none;
+            text-shadow: 0 0 10px red;
+            animation: pulse 0.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.2);
+            }
+
+            100% {
+                transform: scale(1);
+            }
         }
 
         #game-over {
@@ -64,23 +109,29 @@
 <body>
 
     <div id="ui">
+        LEVEL: <span id="level">1</span><br>
         SOLDIERS: <span id="count">1</span><br>
         SCORE: <span id="score">0</span>
     </div>
+    <div id="fever-text">FEVER MODE!!</div>
+    <div id="fever-bar-container">
+        <div id="fever-bar"></div>
+    </div>
 
     <div id="game-over">
-        <h1>GAME OVER</h1>
+        <h1 id="result-title">GAME OVER</h1>
         <p>Score: <span id="final-score">0</span></p>
-        <button onclick="resetGame()">RETRY</button>
+        <button id="retry-btn" onclick="resetGame()">RETRY</button>
     </div>
 
     <script>
         // --- ゲーム設定 ---
-        const RUN_SPEED = 0.2;
-        const SWAY_SPEED = 0.15;
+        let RUN_SPEED = 0.3;
         const LIMIT_X = 6;
-        const GOAL_Z = 350;
-        const BOSS_HP_MAX = 50; // テスト用に調整
+        let GOAL_Z = 400;
+
+        // レベル管理
+        let currentLevel = 1;
 
         let scene, camera, renderer;
         let soldiers = [];
@@ -90,26 +141,56 @@
         let frame = 0;
         let particles = [];
         let obstacles = [];
+        let sceneryObjects = []; // デコレーション
+
+        // フィーバー管理
+        let feverValue = 0;
+        const FEVER_MAX = 100;
+        let isFever = false;
+        let feverTimer = 0;
 
         // ボス変数
         let bossMesh = null;
-        let bossHP = BOSS_HP_MAX;
-        let bossState = 'waiting'; // waiting, battling, dead
+        let bossHP;
+        let bossState = 'waiting';
 
         let targetX = 0;
 
+        // バイオーム設定
+        const BIOMES = [
+            { name: "GRASS", color: 0x3cb371, sky: 0x87CEEB, deco: 0x228B22 }, // 草原
+            { name: "DESERT", color: 0xE6C229, sky: 0xFFD700, deco: 0x8B4513 }, // 砂漠
+            { name: "SNOW", color: 0xE0FFFF, sky: 0xF0F8FF, deco: 0xA9A9A9 }, // 雪原
+            { name: "LAVA", color: 0x8B0000, sky: 0x330000, deco: 0x000000 }  // 溶岩
+        ];
+        let currentBiome = BIOMES[0];
+
         function init() {
+            setupScene();
+            setupGame();
+
+            window.addEventListener('resize', onWindowResize, false);
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+
+            animate();
+        }
+
+        function setupScene() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+            updateBiomeColors();
 
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
             camera.position.set(0, 8, -12);
             camera.lookAt(0, 0, 5);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
+
+            // 既存のcanvasがあれば削除
+            const oldCanvas = document.querySelector('canvas');
+            if (oldCanvas) oldCanvas.remove();
             document.body.appendChild(renderer.domElement);
 
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -120,36 +201,82 @@
             dirLight.castShadow = true;
             scene.add(dirLight);
 
-            const groundGeo = new THREE.PlaneGeometry(20, 1000);
-            const groundMat = new THREE.MeshLambertMaterial({ color: 0x3cb371 });
+            // 地面
+            const groundGeo = new THREE.PlaneGeometry(30, 2000);
+            const groundMat = new THREE.MeshLambertMaterial({ color: currentBiome.color });
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
-            ground.position.z = 400;
+            ground.position.z = 500;
             ground.receiveShadow = true;
+            ground.name = "ground";
             scene.add(ground);
 
+            createDecorations();
+        }
+
+        function setupGame() {
+            soldiers = [];
+            particles = [];
+            obstacles = [];
+            gates = [];
+            bossMesh = null;
+            bossState = 'waiting';
+            gameActive = true;
+            frame = 0;
             crowdGroup = new THREE.Group();
+            crowdGroup.position.set(0, 0, 0);
             scene.add(crowdGroup);
 
+            feverValue = 0;
+            isFever = false;
+
+            // レベルに応じた調整
+            RUN_SPEED = 0.3 + (currentLevel * 0.05);
+            GOAL_Z = 350 + (currentLevel * 50);
+            bossHP = 50 + (currentLevel * 20);
+
             createGoal();
-            addSoldier();
+            addSoldier(); // スタートの1人
+        }
 
-            window.addEventListener('resize', onWindowResize, false);
-            document.addEventListener('mousemove', onMouseMove, false);
-            document.addEventListener('touchmove', onTouchMove, { passive: false });
+        function updateBiomeColors() {
+            const idx = (currentLevel - 1) % BIOMES.length;
+            currentBiome = BIOMES[idx];
+            scene.background = new THREE.Color(currentBiome.sky);
+            scene.fog = new THREE.Fog(currentBiome.sky, 10, 60);
 
-            animate();
+            const ground = scene.getObjectByName("ground");
+            if (ground) ground.material.color.setHex(currentBiome.color);
+        }
+
+        function createDecorations() {
+            // 道の両脇にオブジェクトを配置
+            for (let z = 20; z < GOAL_Z; z += 30) {
+                [-10, 10].forEach(x => {
+                    if (Math.random() > 0.3) {
+                        const size = Math.random() * 2 + 1;
+                        const geo = new THREE.ConeGeometry(size, size * 2, 4);
+                        const mat = new THREE.MeshLambertMaterial({ color: currentBiome.deco });
+                        const mesh = new THREE.Mesh(geo, mat);
+                        mesh.position.set(x + (Math.random() - 0.5) * 5, size, z + (Math.random() - 0.5) * 10);
+                        scene.add(mesh);
+                    }
+                });
+            }
         }
 
         // --- 兵士関連 ---
         function addSoldier() {
-            const color = 0x1E90FF; // Dodson Blue
+            const color = isFever ? 0xFFD700 : 0x1E90FF;
             const soldier = createSoldierMesh(color);
             soldiers.push(soldier);
             crowdGroup.add(soldier);
             createParticles(soldier.position.x, soldier.position.y, soldier.position.z + crowdGroup.position.z, 0x00FFFF, 5);
             updateFormation();
             updateUI();
+
+            // フィーバー加算
+            addFever(2);
         }
 
         function createSoldierMesh(color) {
@@ -169,6 +296,7 @@
             head.castShadow = true;
             group.add(head);
 
+            group.userData = { isSoldier: true };
             return group;
         }
 
@@ -185,6 +313,50 @@
                 const z = Math.sin(angle * 2.4) * radius;
                 soldiers[i].position.set(x, 0, z);
             }
+        }
+
+        // --- フィーバー ---
+        function addFever(amount) {
+            if (isFever) return;
+            feverValue += amount;
+            if (feverValue >= FEVER_MAX) {
+                activateFever();
+            }
+            updateUI();
+        }
+
+        function activateFever() {
+            isFever = true;
+            feverValue = FEVER_MAX;
+            feverTimer = 300; // 5秒くらい (60fps換算)
+            document.getElementById('fever-text').style.display = 'block';
+
+            // 全員金色に
+            soldiers.forEach(s => {
+                s.children[0].material.color.setHex(0xFFD700);
+                s.scale.setScalar(1.5); // 巨大化
+            });
+
+            RUN_SPEED *= 1.5; // 加速
+        }
+
+        function updateFever() {
+            if (!isFever) return;
+            feverTimer--;
+            feverValue = (feverTimer / 300) * FEVER_MAX;
+
+            if (feverTimer <= 0) {
+                isFever = false;
+                feverValue = 0;
+                document.getElementById('fever-text').style.display = 'none';
+                // 元に戻す
+                soldiers.forEach(s => {
+                    s.children[0].material.color.setHex(0x1E90FF);
+                    s.scale.setScalar(1.0);
+                });
+                RUN_SPEED /= 1.5;
+            }
+            updateUI();
         }
 
         // --- エフェクト ---
@@ -240,7 +412,6 @@
             if (!gameActive) return;
             frame++;
 
-            // ボス戦以外は前進
             if (bossState !== 'battling') {
                 crowdGroup.position.z += RUN_SPEED;
                 camera.position.z += RUN_SPEED;
@@ -260,15 +431,14 @@
             updateParticles();
             updateObstacles();
             updateBoss();
+            updateFever();
 
             renderer.render(scene, camera);
-            updateUI();
         }
 
         // --- ゴール＆ボス ---
         function createGoal() {
-            // ライン
-            const lineGeo = new THREE.PlaneGeometry(15, 2);
+            const lineGeo = new THREE.PlaneGeometry(30, 2);
             const texLoader = new THREE.TextureLoader();
             const canvas = document.createElement('canvas');
             canvas.width = 64; canvas.height = 64;
@@ -277,7 +447,7 @@
             ctx.fillStyle = 'black'; ctx.fillRect(0, 0, 32, 32); ctx.fillRect(32, 32, 32, 32);
             const tex = new THREE.CanvasTexture(canvas);
             tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
-            tex.repeat.set(10, 1);
+            tex.repeat.set(20, 1);
             const lineMat = new THREE.MeshBasicMaterial({ map: tex });
             const goalLine = new THREE.Mesh(lineGeo, lineMat);
             goalLine.rotation.x = -Math.PI / 2;
@@ -292,6 +462,8 @@
             group.position.set(0, 0, GOAL_Z + 15);
 
             const mat = new THREE.MeshLambertMaterial({ color: 0x800080 }); // 紫
+            const bossScalar = 1 + (currentLevel * 0.2); // レベルでボスもでかく
+
             const bodyGeo = new THREE.BoxGeometry(6, 12, 4);
             const body = new THREE.Mesh(bodyGeo, mat);
             body.position.y = 6;
@@ -311,20 +483,19 @@
             rightEye.position.set(1, 14, 2.1);
             group.add(rightEye);
 
+            group.scale.setScalar(bossScalar);
             scene.add(group);
             bossMesh = group;
         }
 
         function updateBoss() {
             if (!bossMesh || bossState === 'dead') return;
-
             if (bossState === 'waiting') {
                 bossMesh.position.y = Math.sin(frame * 0.05) * 1;
             }
-
             if (gameActive && crowdGroup.position.z > GOAL_Z - 5) {
                 bossState = 'battling';
-                if (frame % 10 === 0 && soldiers.length > 0) {
+                if (frame % 5 === 0 && soldiers.length > 0) {
                     const s = soldiers.pop();
                     crowdGroup.remove(s);
                     updateFormation();
@@ -337,9 +508,9 @@
                         0xFFFF00, 10
                     );
 
-                    bossHP -= 5;
-                    bossMesh.scale.multiplyScalar(0.98);
-                    bossMesh.position.x = (Math.random() - 0.5) * 0.5; // 振動
+                    bossHP -= (isFever ? 10 : 5); // フィーバーなら2倍ダメージ
+                    bossMesh.scale.multiplyScalar(0.99);
+                    bossMesh.position.x = (Math.random() - 0.5) * 1.0;
 
                     if (bossHP <= 0) {
                         bossDefeated();
@@ -354,9 +525,9 @@
             bossState = 'dead';
             scene.remove(bossMesh);
             for (let i = 0; i < 100; i++) {
-                createParticles(0, 10, GOAL_Z + 15, Math.random() * 0xffffff, 1);
+                createParticles(0, 10, GOAL_Z + 15, Math.random() * 0xffffff, 2);
             }
-            gameClear();
+            levelClear();
         }
 
         // --- 障害物 ---
@@ -370,7 +541,7 @@
             const head = new THREE.Mesh(headGeo, new THREE.MeshLambertMaterial({ color: 0x333333 }));
             head.position.y = 1;
             group.add(head);
-            group.userData = { type: 'hammer', speed: (Math.random() > 0.5 ? 0.05 : -0.05) };
+            group.userData = { type: 'hammer', speed: (Math.random() > 0.5 ? 0.05 : -0.05) * (1 + currentLevel * 0.1) };
             scene.add(group);
             obstacles.push(group);
         }
@@ -381,11 +552,18 @@
                     obs.rotation.z += obs.userData.speed;
                 }
                 if (obs.position.z < crowdGroup.position.z + 2 && obs.position.z > crowdGroup.position.z - 2) {
-                    const angle = Math.abs(obs.rotation.z % Math.PI);
-                    if (angle < 0.5 || angle > 2.6) {
-                        if (Math.random() < 0.1) {
-                            removeSoldier(1);
-                            createParticles(obs.position.x, 1, obs.position.z, 0xFF0000, 5);
+                    if (isFever) {
+                        // フィーバー中は障害物を破壊！
+                        scene.remove(obs);
+                        obs.position.y = -100; // 画面外へ
+                        createParticles(obs.position.x, 2, obs.position.z, 0xFFA500, 20);
+                    } else {
+                        const angle = Math.abs(obs.rotation.z % Math.PI);
+                        if (angle < 0.5 || angle > 2.6) {
+                            if (Math.random() < 0.1) {
+                                removeSoldier(1);
+                                createParticles(obs.position.x, 1, obs.position.z, 0xFF0000, 5);
+                            }
                         }
                     }
                 }
@@ -404,7 +582,7 @@
             gates.push(gate1, gate2);
             scene.add(gate1, gate2);
 
-            if (Math.random() < 0.5) {
+            if (Math.random() < 0.4 + (currentLevel * 0.1)) { // レベルが高いと障害物増える
                 createHammer(zPos + 20);
             }
         }
@@ -496,6 +674,8 @@
         }
 
         function removeSoldier(count) {
+            if (isFever) return; // フィーバー中は無敵
+
             for (let i = 0; i < count; i++) {
                 if (soldiers.length === 0) break;
                 const s = soldiers.pop();
@@ -507,28 +687,49 @@
             if (soldiers.length === 0) { gameOver(); }
         }
 
-        function gameClear() {
+        function levelClear() {
             gameActive = false;
             const gameOver = document.getElementById('game-over');
             gameOver.style.display = 'block';
-            gameOver.querySelector('h1').innerText = "BOSS DEFEATED!";
-            gameOver.querySelector('h1').style.color = "#FFD700";
-            gameOver.querySelector('#final-score').innerHTML = `You are the Hero!<br>Units left: ${soldiers.length}`;
-            gameOver.querySelector('button').innerText = "PLAY AGAIN";
+            document.getElementById('result-title').innerText = `LEVEL ${currentLevel} CLEARED!`;
+            document.getElementById('result-title').style.color = "#FFD700";
+            document.getElementById('final-score').innerHTML = `Next Difficulty Up!<br>Remaining: ${soldiers.length}`;
+            const btn = document.getElementById('retry-btn');
+            btn.innerText = "NEXT LEVEL";
+            btn.onclick = nextLevel;
         }
 
         function gameOver() {
             gameActive = false;
             document.getElementById('game-over').style.display = 'block';
-            document.getElementById('game-over').querySelector('h1').innerText = "GAME OVER";
-            document.getElementById('game-over').querySelector('h1').style.color = "#FF0000";
+            document.getElementById('result-title').innerText = "GAME OVER";
+            document.getElementById('result-title').style.color = "#FF0000";
             document.getElementById('final-score').innerText = score;
+            const btn = document.getElementById('retry-btn');
+            btn.innerText = "RETRY";
+            btn.onclick = resetGame;
+        }
+
+        function nextLevel() {
+            currentLevel++;
+            document.getElementById('game-over').style.display = 'none';
+
+            // シーン再構築
+            while (scene.children.length > 0) {
+                scene.remove(scene.children[0]);
+            }
+
+            // 変数リセット
+            init();
         }
 
         function updateUI() {
+            document.getElementById('level').innerText = currentLevel;
             document.getElementById('count').innerText = soldiers.length;
-            score = Math.floor(crowdGroup.position.z);
+            score = Math.floor(crowdGroup.position.z) + (currentLevel - 1) * 1000;
             document.getElementById('score').innerText = score;
+
+            document.getElementById('fever-bar').style.width = (feverValue / FEVER_MAX * 100) + '%';
         }
 
         function resetGame() {
